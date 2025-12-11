@@ -8,8 +8,8 @@
         body { font-family: Arial, sans-serif; margin: 24px; max-width:700px; }
         label { display:block; margin-top:10px; font-weight:600; }
         input { padding:8px; margin-top:6px; width:100%; box-sizing:border-box; }
-        button { margin-top:12px; padding:10px 16px; font-size:16px; }
-        #result { margin-top:18px; font-size:18px; font-weight:700; }
+        button { margin-top:12px; padding:10px 16px; font-size:16px; cursor:pointer; }
+        #result { margin-top:18px; font-size:18px; font-weight:700; white-space:pre-wrap; }
         .row { display:flex; gap:10px; }
         .col { flex:1; }
     </style>
@@ -56,9 +56,59 @@
 <div id="result">Result will appear here.</div>
 
 <script>
+/*
+  Plain (non-module) script so predict() is available to onclick.
+  Ensure API is https and matches your Render URL.
+*/
 const API = "https://battery-project.onrender.com/predict";
 
 async function predict(){
-  document.getElementById('result').innerText = "Requesting...";
+  const out = document.getElementById('result');
+  out.innerText = "Requesting...";
   const payload = {
-    battery_percent: parseFloat(document.getElementById('battery_percent').value) || 0
+    battery_percent: parseFloat(document.getElementById('battery_percent').value) || 0,
+    cpu_pct: parseFloat(document.getElementById('cpu_pct').value) || 0,
+    screen_on: parseInt(document.getElementById('screen_on').value) || 0,
+    background_factor: parseFloat(document.getElementById('background_factor').value) || 1.0,
+    drain_per_min: parseFloat(document.getElementById('drain_per_min').value) || 0.0,
+    roll_cpu_5: parseFloat(document.getElementById('roll_cpu_5').value) || 0,
+    roll_drain_5: parseFloat(document.getElementById('roll_drain_5').value) || 0.0,
+    session_encoded: parseInt(document.getElementById('session_encoded').value) || 0
+  };
+
+  console.log("Payload:", payload);
+
+  try {
+    const res = await fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    console.log("HTTP status:", res.status, res.statusText);
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch(e) { data = text; }
+
+    console.log("Response body:", data);
+
+    if (!res.ok) {
+      out.innerText = `Server returned ${res.status} ${res.statusText}\n\n` + JSON.stringify(data, null, 2);
+      return;
+    }
+
+    // Success: show predicted value and full response for inspection
+    if (data && typeof data.predicted_minutes_remaining !== "undefined") {
+      out.innerText = "Predicted minutes remaining: " + data.predicted_minutes_remaining;
+    } else {
+      out.innerText = "Unexpected response:\n" + JSON.stringify(data, null, 2);
+    }
+  } catch (err) {
+    console.error("Fetch error:", err);
+    out.innerText = "Network error — open browser console for details.\n\n" + err.message;
+  }
+}
+</script>
+
+</body>
+</html>
