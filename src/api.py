@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
+
 import joblib
 import pandas as pd
 
@@ -7,6 +9,15 @@ import pandas as pd
 model = joblib.load("models/battery_life_model.pkl")
 
 app = FastAPI(title="Battery Life Prediction API")
+# allow cross-origin requests from your GitHub Pages frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://madan1234ja.github.io"],  # <- exact origin of your frontend
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 class BatteryInput(BaseModel):
     battery_percent: float
