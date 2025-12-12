@@ -1,4 +1,5 @@
 # src/api.py
+from typing import Optional
 from fastapi import FastAPI, Request, Header, HTTPException, Response
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,33 +11,53 @@ import logging
 import os
 from collections import Counter
 
-# --- logging ----------
+# ----------------------------
+# Configuration & utilities
+# ----------------------------
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("battery_api")
 
-# --- load model ----------
+# Optional API key: set API_KEY in environment on Render to require it
+API_KEY = os.getenv("API_KEY")
+
+
+def check_api_key(x_api_key: Optional[str]):
+    """Raise HTTPException 401 if API_KEY is set and header is incorrect/missing."""
+    if API_KEY:
+        if not x_api_key or x_api_key != API_KEY:
+            raise HTTPException(status_code=401, detail="Invalid API Key")
+
+
+# ----------------------------
+# Load model (at module import)
+# ----------------------------
+# model file expected at models/battery_life_model.pkl
+# If this fails in production check requirements/scikit-learn version compatibility.
 model = joblib.load("models/battery_life_model.pkl")
 
-# --- app + CORS ----------
+# ----------------------------
+# FastAPI app + CORS
+# ----------------------------
 app = FastAPI(title="Battery Life Prediction API")
 
-# During testing you may use ["*"], but in production use exact origin list
+# In production prefer an exact origin list instead of "*"
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://madan1234ja.github.io"],
+    allow_origins=["https://madan1234ja.github.io"],  # frontend origin
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- simple metrics ---
+# ----------------------------
+# Simple in-memory metrics
+# ----------------------------
 _metrics = Counter()
-@app.get("/metrics")
-def get_metrics():
-    return {"predict_calls": _metrics["predict_calls"]}
 
 
-# --- request logging middleware ---
+# ----------------------------
+# Request logging middleware
+# ----------------------------
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start = time.time()
@@ -49,7 +70,12 @@ async def log_requests(request: Request, call_next):
     logger.info(f"{request.method} {request.url.path} status={response.status_code} time_ms={elapsed_ms:.1f}")
     return response
 
-# --- OPTIONS preflight fallback (short-term) ---
+
+# ----------------------------
+# Short-term OPTIONS preflight fallback (safe to remove later)
+# ----------------------------
+# This is a safety fallback for browsers that send OPTIONS preflight.
+# CORSMiddleware should normally handle preflight; remove this handler once CORS is confirmed.
 @app.options("/predict")
 def predict_options():
     headers = {
@@ -60,7 +86,10 @@ def predict_options():
     }
     return Response(status_code=204, headers=headers)
 
-# --- input model ----------
+
+# ----------------------------
+# Pydantic input model
+# ----------------------------
 class BatteryInput(BaseModel):
     battery_percent: float
     cpu_pct: float
@@ -71,33 +100,35 @@ class BatteryInput(BaseModel):
     roll_drain_5: float
     session_encoded: int
 
-# --- health endpoint ----------
+
+# ----------------------------
+# Endpoints
+# ----------------------------
 @app.get("/health")
 def health_check():
+    """Basic health check and presence of the API."""
     return {"status": "ok", "message": "Battery API is running"}
 
-# --- metrics endpoint ----------
+
 @app.get("/metrics")
 def get_metrics():
+    """Return a simple JSON metric; replace with prometheus_client for production scraping."""
     return {"predict_calls": _metrics["predict_calls"]}
 
-# --- optional API key protection (reads API_KEY env var) ---
-API_KEY = os.getenv("API_KEY")
 
-def check_api_key(x_api_key: str | None):
-    if API_KEY:
-        if not x_api_key or x_api_key != API_KEY:
-            raise HTTPException(status_code=401, detail="Invalid API Key")
-
-# --- predict endpoint ----------
 @app.post("/predict")
-def predict_battery_life(data: BatteryInput, x_api_key: str | None = Header(None)):
-    # verify API key if configured
+def predict_battery_life(data: BatteryInput, x_api_key: Optional[str] = Header(None)):
+    """Predict remaining minutes of battery life from the incoming features.
+
+    If API_KEY environment variable is set, the request must include header `x-api-key`.
+    """
+    # API key check (no-op if API_KEY is not configured)
     check_api_key(x_api_key)
 
-    # increment simple counter
+    # Increment in-process counter
     _metrics["predict_calls"] += 1
 
+    # Build DataFrame exactly as the model expects
     df = pd.DataFrame([[
         data.battery_percent,
         data.cpu_pct,
@@ -118,13 +149,17 @@ def predict_battery_life(data: BatteryInput, x_api_key: str | None = Header(None
         "session_encoded"
     ])
 
+    # Model inference
     pred = model.predict(df)[0]
     return {
         "predicted_minutes_remaining": round(float(pred), 2),
         "input": data.dict()
     }
 
-# --- local run (for developer) ---
+
+# ----------------------------
+# Local development runner
+# ----------------------------
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("src.api:app", host="0.0.0.0", port=8000, reload=True)
