@@ -31,6 +31,10 @@ app.add_middleware(
 
 # --- simple metrics ---
 _metrics = Counter()
+@app.get("/metrics")
+def get_metrics():
+    return {"predict_calls": _metrics["predict_calls"]}
+
 
 # --- request logging middleware ---
 @app.middleware("http")
