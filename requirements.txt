@@ -1,6 +1,9 @@
-fastapi 
-uvicorn 
-pandas 
-scikit-learn 
-joblib 
-numpy 
+fastapi
+uvicorn
+pandas
+numpy
+joblib
+scikit-learn==1.7.1
+prometheus-client
+pytest
+requests
