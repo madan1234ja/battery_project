@@ -1,5 +1,4 @@
 # src/api.py
-from typing import Optional
 from fastapi import FastAPI, Request, Header, HTTPException, Response
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,85 +10,77 @@ import logging
 import os
 from collections import Counter
 
-# ----------------------------
-# Configuration & utilities
-# ----------------------------
+# Prometheus
+from prometheus_client import Counter as PromCounter
+from prometheus_client import Histogram, generate_latest, CONTENT_TYPE_LATEST
+
+# ------------------ CONFIG ------------------
+MODEL_NAME = os.getenv("MODEL_NAME", "battery_life_model")
+MODEL_VERSION = os.getenv("MODEL_VERSION", "1.0.0")
+API_KEY = os.getenv("API_KEY")
+
+# ------------------ LOGGING ------------------
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("battery_api")
 
-# Optional API key: set API_KEY in environment on Render to require it
-API_KEY = os.getenv("API_KEY")
-
-
-def check_api_key(x_api_key: Optional[str]):
-    """Raise HTTPException 401 if API_KEY is set and header is incorrect/missing."""
-    if API_KEY:
-        if not x_api_key or x_api_key != API_KEY:
-            raise HTTPException(status_code=401, detail="Invalid API Key")
-
-
-# ----------------------------
-# Load model (at module import)
-# ----------------------------
-# model file expected at models/battery_life_model.pkl
-# If this fails in production check requirements/scikit-learn version compatibility.
+# ------------------ LOAD MODEL ------------------
 model = joblib.load("models/battery_life_model.pkl")
 
-# ----------------------------
-# FastAPI app + CORS
-# ----------------------------
+# ------------------ APP ------------------
 app = FastAPI(title="Battery Life Prediction API")
 
-# In production prefer an exact origin list instead of "*"
+# ------------------ CORS ------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://madan1234ja.github.io"],  # frontend origin
+    allow_origins=["https://madan1234ja.github.io"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ----------------------------
-# Simple in-memory metrics
-# ----------------------------
-_metrics = Counter()
+# ------------------ SIMPLE JSON METRICS ------------------
+_simple_metrics = Counter()
 
+@app.get("/metrics")
+def json_metrics():
+    return {"predict_calls": _simple_metrics["predict_calls"]}
 
-# ----------------------------
-# Request logging middleware
-# ----------------------------
+# ------------------ PROMETHEUS METRICS ------------------
+PREDICT_COUNTER = PromCounter(
+    "predict_requests_total",
+    "Total number of prediction requests"
+)
+
+PREDICT_LATENCY = Histogram(
+    "predict_request_latency_seconds",
+    "Prediction request latency in seconds"
+)
+
+@app.get("/prometheus")
+def prometheus_metrics():
+    return Response(
+        content=generate_latest(),
+        media_type=CONTENT_TYPE_LATEST
+    )
+
+# ------------------ MIDDLEWARE ------------------
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start = time.time()
-    try:
-        response = await call_next(request)
-    except Exception:
-        logger.exception(f"Error handling request {request.method} {request.url.path}")
-        raise
+    response = await call_next(request)
     elapsed_ms = (time.time() - start) * 1000
-    logger.info(f"{request.method} {request.url.path} status={response.status_code} time_ms={elapsed_ms:.1f}")
+    logger.info(
+        f"{request.method} {request.url.path} "
+        f"status={response.status_code} time_ms={elapsed_ms:.2f}"
+    )
     return response
 
+# ------------------ AUTH ------------------
+def check_api_key(x_api_key: str | None):
+    if API_KEY and x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API Key")
 
-# ----------------------------
-# Short-term OPTIONS preflight fallback (safe to remove later)
-# ----------------------------
-# This is a safety fallback for browsers that send OPTIONS preflight.
-# CORSMiddleware should normally handle preflight; remove this handler once CORS is confirmed.
-@app.options("/predict")
-def predict_options():
-    headers = {
-        "Access-Control-Allow-Origin": "https://madan1234ja.github.io",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-KEY",
-        "Access-Control-Allow-Credentials": "true",
-    }
-    return Response(status_code=204, headers=headers)
-
-
-# ----------------------------
-# Pydantic input model
-# ----------------------------
+# ------------------ SCHEMA ------------------
 class BatteryInput(BaseModel):
     battery_percent: float
     cpu_pct: float
@@ -100,35 +91,26 @@ class BatteryInput(BaseModel):
     roll_drain_5: float
     session_encoded: int
 
-
-# ----------------------------
-# Endpoints
-# ----------------------------
+# ------------------ ROUTES ------------------
 @app.get("/health")
-def health_check():
-    """Basic health check and presence of the API."""
-    return {"status": "ok", "message": "Battery API is running"}
-
-
-@app.get("/metrics")
-def get_metrics():
-    """Return a simple JSON metric; replace with prometheus_client for production scraping."""
-    return {"predict_calls": _metrics["predict_calls"]}
-
+def health():
+    return {
+        "status": "ok",
+        "model": {
+            "name": MODEL_NAME,
+            "version": MODEL_VERSION
+        }
+    }
 
 @app.post("/predict")
-def predict_battery_life(data: BatteryInput, x_api_key: Optional[str] = Header(None)):
-    """Predict remaining minutes of battery life from the incoming features.
-
-    If API_KEY environment variable is set, the request must include header `x-api-key`.
-    """
-    # API key check (no-op if API_KEY is not configured)
+def predict_battery_life(
+    data: BatteryInput,
+    x_api_key: str | None = Header(None)
+):
     check_api_key(x_api_key)
 
-    # Increment in-process counter
-    _metrics["predict_calls"] += 1
+    start_time = time.time()
 
-    # Build DataFrame exactly as the model expects
     df = pd.DataFrame([[
         data.battery_percent,
         data.cpu_pct,
@@ -149,17 +131,19 @@ def predict_battery_life(data: BatteryInput, x_api_key: Optional[str] = Header(N
         "session_encoded"
     ])
 
-    # Model inference
-    pred = model.predict(df)[0]
+    prediction = model.predict(df)[0]
+
+    # ---- metrics ----
+    _simple_metrics["predict_calls"] += 1
+    PREDICT_COUNTER.inc()
+    PREDICT_LATENCY.observe(time.time() - start_time)
+
     return {
-        "predicted_minutes_remaining": round(float(pred), 2),
+        "predicted_minutes_remaining": round(float(prediction), 2),
         "input": data.dict()
     }
 
-
-# ----------------------------
-# Local development runner
-# ----------------------------
+# ------------------ LOCAL RUN ------------------
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("src.api:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("src.api:app", host="0.0.0.0", port=8000)
