@@ -1,5 +1,7 @@
 __pycache__/
 *.pyc
 .env
-stop
+tests/
+exit
+origin main
 .ipynb_checkpoints/
