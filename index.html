@@ -1,112 +1,220 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="utf-8" />
-    <title>Battery Life Predictor</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style>
-        body { font-family: Arial, sans-serif; margin: 24px; max-width:700px; }
-        label { display:block; margin-top:10px; font-weight:600; }
-        input { padding:8px; margin-top:6px; width:100%; box-sizing:border-box; }
-        button { margin-top:12px; padding:10px 16px; font-size:16px; cursor:pointer; }
-        #result { margin-top:18px; font-size:18px; font-weight:700; white-space:pre-wrap; }
-        .row { display:flex; gap:10px; }
-        .col { flex:1; }
-    </style>
+<meta charset="UTF-8">
+<title>Battery Life Predictor</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<style>
+body {
+    font-family: "Segoe UI", Roboto, Arial, sans-serif;
+    background: #f4f6f9;
+    display: flex;
+    justify-content: center;
+    padding: 40px;
+}
+
+.card {
+    background: #ffffff;
+    width: 100%;
+    max-width: 520px;
+    padding: 28px;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+}
+
+h1 {
+    text-align: center;
+    margin-bottom: 8px;
+}
+
+.subtitle {
+    text-align: center;
+    color: #666;
+    margin-bottom: 24px;
+    font-size: 14px;
+}
+
+label {
+    display: block;
+    font-weight: 600;
+    margin-top: 14px;
+}
+
+input {
+    width: 100%;
+    padding: 10px;
+    margin-top: 6px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    font-size: 14px;
+}
+
+.row {
+    display: flex;
+    gap: 12px;
+}
+
+.col {
+    flex: 1;
+}
+
+button {
+    width: 100%;
+    margin-top: 20px;
+    padding: 12px;
+    font-size: 16px;
+    font-weight: 600;
+    background: #2563eb;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+button:disabled {
+    background: #9ca3af;
+    cursor: not-allowed;
+}
+
+#result {
+    margin-top: 20px;
+    font-size: 18px;
+    font-weight: 700;
+    text-align: center;
+}
+
+#error {
+    margin-top: 12px;
+    color: #dc2626;
+    font-size: 14px;
+    text-align: center;
+}
+
+.loader {
+    display: none;
+    margin: 16px auto;
+    border: 4px solid #e5e7eb;
+    border-top: 4px solid #2563eb;
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    100% { transform: rotate(360deg); }
+}
+</style>
 </head>
+
 <body>
-<h1>Battery Life Prediction</h1>
 
-<label>Battery Percent</label>
-<input id="battery_percent" type="number" placeholder="e.g. 45" />
+<div class="card">
+    <h1>Battery Life Prediction</h1>
+    <div class="subtitle">ML-powered remaining battery time estimator</div>
 
-<label>CPU %</label>
-<input id="cpu_pct" type="number" placeholder="e.g. 30" />
+    <label>Battery Percentage</label>
+    <input id="battery_percent" type="number" value="45">
 
-<div class="row">
-  <div class="col">
-    <label>Screen On (0/1)</label>
-    <input id="screen_on" type="number" placeholder="0 or 1" />
-  </div>
-  <div class="col">
-    <label>Session Encoded</label>
-    <input id="session_encoded" type="number" placeholder="0 light / 1 medium / 2 heavy" />
-  </div>
+    <label>CPU Usage (%)</label>
+    <input id="cpu_pct" type="number" value="30">
+
+    <div class="row">
+        <div class="col">
+            <label>Screen On (0/1)</label>
+            <input id="screen_on" type="number" value="1">
+        </div>
+        <div class="col">
+            <label>Session Type</label>
+            <input id="session_encoded" type="number" value="1">
+        </div>
+    </div>
+
+    <label>Background Factor</label>
+    <input id="background_factor" type="number" step="0.01" value="1.1">
+
+    <label>Drain per Minute</label>
+    <input id="drain_per_min" type="number" step="0.01" value="0.35">
+
+    <div class="row">
+        <div class="col">
+            <label>Rolling CPU (5 min)</label>
+            <input id="roll_cpu_5" type="number" value="28">
+        </div>
+        <div class="col">
+            <label>Rolling Drain (5 min)</label>
+            <input id="roll_drain_5" type="number" step="0.01" value="0.33">
+        </div>
+    </div>
+
+    <button id="btn" onclick="predict()">Predict Battery Life</button>
+
+    <div class="loader" id="loader"></div>
+
+    <div id="result"></div>
+    <div id="error"></div>
 </div>
-
-<label>Background Factor</label>
-<input id="background_factor" type="number" step="0.01" placeholder="e.g. 1.1" />
-
-<label>Drain per minute</label>
-<input id="drain_per_min" type="number" step="0.01" placeholder="e.g. 0.35" />
-
-<div class="row">
-  <div class="col">
-    <label>roll_cpu_5</label>
-    <input id="roll_cpu_5" type="number" placeholder="e.g. 28" />
-  </div>
-  <div class="col">
-    <label>roll_drain_5</label>
-    <input id="roll_drain_5" type="number" step="0.01" placeholder="e.g. 0.33" />
-  </div>
-</div>
-
-<button id="btn" onclick="predict()">Predict Battery Life</button>
-
-<div id="result">Result will appear here.</div>
 
 <script>
-/*
-  Plain (non-module) script so predict() is available to onclick.
-  Ensure API is https and matches your Render URL.
-*/
-const API = "https://battery-project.onrender.com/predict";
+const API_URL = "https://battery-project.onrender.com/predict";
 
-async function predict(){
-  const out = document.getElementById('result');
-  out.innerText = "Requesting...";
-  const payload = {
-    battery_percent: parseFloat(document.getElementById('battery_percent').value) || 0,
-    cpu_pct: parseFloat(document.getElementById('cpu_pct').value) || 0,
-    screen_on: parseInt(document.getElementById('screen_on').value) || 0,
-    background_factor: parseFloat(document.getElementById('background_factor').value) || 1.0,
-    drain_per_min: parseFloat(document.getElementById('drain_per_min').value) || 0.0,
-    roll_cpu_5: parseFloat(document.getElementById('roll_cpu_5').value) || 0,
-    roll_drain_5: parseFloat(document.getElementById('roll_drain_5').value) || 0.0,
-    session_encoded: parseInt(document.getElementById('session_encoded').value) || 0
-  };
+async function predict() {
+    document.getElementById("error").innerText = "";
+    document.getElementById("result").innerText = "";
 
-  console.log("Payload:", payload);
+    const btn = document.getElementById("btn");
+    const loader = document.getElementById("loader");
 
-  try {
-    const res = await fetch(API, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
+    const inputs = [
+        "battery_percent","cpu_pct","screen_on",
+        "background_factor","drain_per_min",
+        "roll_cpu_5","roll_drain_5","session_encoded"
+    ];
 
-    console.log("HTTP status:", res.status, res.statusText);
-    const text = await res.text();
-    let data;
-    try { data = JSON.parse(text); } catch(e) { data = text; }
-
-    console.log("Response body:", data);
-
-    if (!res.ok) {
-      out.innerText = `Server returned ${res.status} ${res.statusText}\n\n` + JSON.stringify(data, null, 2);
-      return;
+    for (let id of inputs) {
+        if (document.getElementById(id).value === "") {
+            document.getElementById("error").innerText = "Please fill all fields.";
+            return;
+        }
     }
 
-    // Success: show predicted value and full response for inspection
-    if (data && typeof data.predicted_minutes_remaining !== "undefined") {
-      out.innerText = "Predicted minutes remaining: " + data.predicted_minutes_remaining;
-    } else {
-      out.innerText = "Unexpected response:\n" + JSON.stringify(data, null, 2);
+    const payload = {
+        battery_percent: Number(battery_percent.value),
+        cpu_pct: Number(cpu_pct.value),
+        screen_on: Number(screen_on.value),
+        background_factor: Number(background_factor.value),
+        drain_per_min: Number(drain_per_min.value),
+        roll_cpu_5: Number(roll_cpu_5.value),
+        roll_drain_5: Number(roll_drain_5.value),
+        session_encoded: Number(session_encoded.value)
+    };
+
+    btn.disabled = true;
+    loader.style.display = "block";
+
+    try {
+        const res = await fetch(API_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+            throw new Error("API error");
+        }
+
+        const data = await res.json();
+        document.getElementById("result").innerText =
+            `Estimated Remaining Time: ${data.predicted_minutes_remaining} minutes`;
+
+    } catch (err) {
+        document.getElementById("error").innerText =
+            "Unable to fetch prediction. Please try again later.";
+    } finally {
+        btn.disabled = false;
+        loader.style.display = "none";
     }
-  } catch (err) {
-    console.error("Fetch error:", err);
-    out.innerText = "Network error — open browser console for details.\n\n" + err.message;
-  }
 }
 </script>
 
