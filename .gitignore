@@ -5,3 +5,6 @@ tests/
 exit
 origin main
 .ipynb_checkpoints/
+.github/
+        stop
+        "\357\200\233exit"
